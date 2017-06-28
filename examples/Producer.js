@@ -1,5 +1,5 @@
 ﻿if (typeof module !== 'undefined' && module.exports) {
-    var zbus = require("../../../src/main/resources/zbus.js");
+    var zbus = require("..//zbus.js");
     var Broker = zbus.Broker;
     var Producer = zbus.Producer;
 }

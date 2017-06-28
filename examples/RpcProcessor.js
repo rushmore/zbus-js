@@ -28,7 +28,7 @@ function myplus(a, b) {
 
 //---------------construct RpcProcessor----------------
 if (typeof module !== 'undefined' && module.exports) {
-    var zbus = require("../../../src/main/resources/zbus.js");
+    var zbus = require("../zbus.js");
     var RpcProcessor = zbus.RpcProcessor;
     var Broker = zbus.Broker;
     var Consumer = zbus.Consumer;
