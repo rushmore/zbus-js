@@ -21,7 +21,7 @@ zbus carefully designed on its protocol and components to embrace KISS(Keep It S
 
 ## Getting started
 
-Start zbus, see [https://gitee.com/rushmore/zbus](https://gitee.com/rushmore/zbus) 
+Start zbus, see [https://github.com/rushmore/zbus](https://github.com/rushmore/zbus) 
 
 **1. NodeJS**
 
