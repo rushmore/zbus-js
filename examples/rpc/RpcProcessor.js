@@ -25,22 +25,24 @@ function myplus(a, b) {
 	return a + b;
 }   
 
-
-//---------------construct RpcProcessor----------------
+ 
 if (typeof module !== 'undefined' && module.exports) {
-    var zbus = require("../zbus.js");
-    var RpcProcessor = zbus.RpcProcessor;
-    var Broker = zbus.Broker;
-    var Consumer = zbus.Consumer;
+    var zbus = require("../../zbus.js");
+    RpcProcessor = zbus.RpcProcessor;
+    Broker = zbus.Broker;
+	Consumer = zbus.Consumer;  
+	var logger = zbus.logger;
 } 
+
+logger.level = logger.DEBUG; //from zbus.js
 
 var rpc = new RpcProcessor();
 rpc.addModule(myplus); //method example
 rpc.addModule(new MyService()); //object example
 
 
-//start Consumer with rpc.onMessage handling
-var broker = new Broker("localhost:15555");
+//You need Broker and Consumer, RpcProcessor is just another type of message handler
+var broker = new Broker("localhost:15555;localhost:15556");
 
 var c = new Consumer(broker, "MyRpc");
 c.connectionCount = 1;

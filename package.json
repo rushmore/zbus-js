@@ -1,0 +1,17 @@
+{
+  "name": "zbus",
+  "version": "0.8.4",
+  "description": "- zbus.js works for both Browser and NodeJS environments.\r - zbus.js is the only source file required",
+  "main": "zbus.js", 
+  "repository": {
+    "type": "git",
+    "url": "https://gitee.com/rushmore/zbus-javascript.git"
+  },
+  "keywords": [
+    "zbus",
+    "MQ",
+    "RPC"
+  ],
+  "author": "rushmore <hong.leiming@qq.com>",
+  "license": "MIT"
+}
