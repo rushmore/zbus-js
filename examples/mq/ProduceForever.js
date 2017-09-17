@@ -11,9 +11,13 @@ function asleep(ms) {
 }
 
 async function f(){ 
+	
+var token = "mytopic"; //authentication
+var broker = new Broker(); 
+broker.addTracker({address: 'localhost:15555', token: token});
+broker.addTracker({address: 'localhost:15556', token: token});
 
-var broker = new Broker("localhost:15555;localhost:15556"); 
-var p = new Producer(broker);
+var p = new Producer(broker, token);
 
 var count = 0, topic = "MyTopic";
 await p.declare(topic); 

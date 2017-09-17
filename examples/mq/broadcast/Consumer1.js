@@ -6,10 +6,14 @@
 }  
 logger.level = logger.DEBUG; //from zbus.js
 
-var broker = new Broker("localhost:15555;localhost:15556");
+var broker = new Broker(); 
+broker.addTracker({address: 'localhost:15555', token: 'mytopic'});
+//broker.addTracker({address: 'localhost:15556', token: 'mytopic'}); 
+
 var c = new Consumer(broker, {
     topic: "MyTopic",
     consumeGroup: "JS-BroadcastGroup1", //Start multiple consume groups
+    token: 'mytopic',
 });
 
 c.messageHandler = function (msg, client) {

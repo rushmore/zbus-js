@@ -3,8 +3,11 @@ class Protocol{ }
 //MQ Produce/Consume
 Protocol.PRODUCE = "produce";
 Protocol.CONSUME = "consume";
+Protocol.UNCONSUME = "unconsume";
 Protocol.RPC     = "rpc";
 Protocol.ROUTE   = "route";     //route back message to sender, designed for RPC
+
+Protocol.SSL = "ssl";
 
 //Topic/ConsumeGroup control
 Protocol.DECLARE = "declare";
@@ -47,12 +50,14 @@ Protocol.ORIGIN_STATUS = "origin_status";
 //Security 
 Protocol.TOKEN = "token"; 
 
-Protocol.HEARTBEAT = 'heartbeat';
- 
-Protocol.MASK_PAUSE          = 1 << 0;
-Protocol.MASK_RPC            = 1 << 1;
-Protocol.MASK_EXCLUSIVE      = 1 << 2;
-Protocol.MASK_DELETE_ON_EXIT = 1 << 3;
+Protocol.HEARTBEAT = 'heartbeat'; 
+
+Protocol.MASK_MEMORY    	 = 1<<0;
+Protocol.MASK_RPC    	     = 1<<1;
+Protocol.MASK_PROXY    	     = 1<<2; 
+Protocol.MASK_PAUSE    	     = 1<<3;  
+Protocol.MASK_EXCLUSIVE 	 = 1<<4;  
+Protocol.MASK_DELETE_ON_EXIT = 1<<5; 
 
 ////////////////////////////////////////////////////////////
 function hashSize(obj) {
@@ -426,9 +431,9 @@ function httpDecode(data) {
     var encoding = msg.encoding;
     if (!encoding) encoding = "utf8"; 
     var bodyData = data.slice(pos + 4, pos + 4 + lenVal);
-    if (typeVal == "text/html" || typeVal == "text/plain") {
+    if (typeVal.startsWith("text/html") || typeVal.startsWith("text/plain")) {
         msg.body = uint8Array2String(bodyData, encoding);
-    } else if (typeVal == "application/json") {
+    } else if (typeVal.startsWith("application/json")) {
         var bodyString = uint8Array2String(bodyData, encoding);
         msg.body = JSON.parse(bodyString);
     } else {
@@ -437,16 +442,7 @@ function httpDecode(data) {
 
     return msg;
 }
-
-
-function Ticket(reqMsg, resolve) {
-    this.id = uuid();
-    reqMsg.id = this.id;
-
-    this.request = reqMsg;
-    this.resolve = resolve;  
-} 
-
+ 
 function addressKey(serverAddress) {
     var scheme = ""
     if (serverAddress.sslEnabled) {
@@ -455,28 +451,56 @@ function addressKey(serverAddress) {
     return scheme + serverAddress.address;
 }
 
-function normalizeAddress(serverAddress, certFile) {
-    if (typeof (serverAddress) == 'string') {
-        var sslEnabled = false;
-        if (certFile) sslEnabled = true;
+class ServerAddress {
+    constructor(serverAddress, sslEnabled, certificate, token){
+        if(typeof(serverAddress) == 'string'){
+            serverAddress = serverAddress.trim();
+            if (serverAddress.startsWith("ws://")) {
+                serverAddress = serverAddress.substring(5);
+                sslEnabled = false;
+            }
+            if (serverAddress.startsWith("wss://")) {
+                serverAddress = serverAddress.substring(6);
+                sslEnabled = true;
+            }
 
-        serverAddress = serverAddress.trim();
-        if (serverAddress.startsWith("ws://")) {
-            serverAddress = serverAddress.substring(5);
-        }
-        if (serverAddress.startsWith("wss://")) {
-            serverAddress = serverAddress.substring(6);
-            sslEnabled = true;
-        }
+            this.address = serverAddress;
+            this.sslEnabled = sslEnabled;
+            this.certificate = certificate;
+            this.token = token;
+            return;
+        }  
 
-        serverAddress = {
-            address: serverAddress,
-            sslEnabled: sslEnabled,
-        }; 
+        this.address = serverAddress.address;
+        this.sslEnabled = serverAddress.sslEnabled || sslEnabled==true;
+        this.certificate = serverAddress.certificate || certificate;
+        this.token = serverAddress.token || token;  
     }
-    return serverAddress; 
-}
 
+    setCertFile(certFile) {
+        if(!__NODEJS__) return; 
+        this.certificate = fs.readFileSync(certFile);
+    }
+
+    string () {
+        var scheme = ""
+        if (this.sslEnabled) {
+            scheme = "[SSL]"
+        }
+        return scheme + this.address;
+    }
+
+    in (serverAddressArray) {
+        for (var i in serverAddressArray) {
+            var addr = serverAddressArray[i];
+            if (addr.address == this.address && addr.sslEnabled == this.sslEnabled) {
+                return true;
+            }
+        }
+        return false;
+    } 
+}
+ 
 function containsAddress(serverAddressArray, serverAddress) {
     for (var i in serverAddressArray) {
         var addr = serverAddressArray[i];
@@ -485,15 +509,14 @@ function containsAddress(serverAddressArray, serverAddress) {
         }
     }
     return false;
-}
+} 
 
-function MqClient(serverAddress, certFile) { 
+function MqClient(serverAddress) { 
     if (__NODEJS__) {
         Events.EventEmitter.call(this);
     }
-    serverAddress = normalizeAddress(serverAddress, certFile); 
-    this.serverAddress = serverAddress;
-    this.certFile = certFile;
+    serverAddress = new ServerAddress(serverAddress); 
+    this.serverAddress = serverAddress; 
 
     var address = this.serverAddress.address;
     var p = address.indexOf(':');
@@ -511,9 +534,7 @@ function MqClient(serverAddress, certFile) {
     this.ticketTable = {};
     this.onMessage = null;
     this.onConnected = null;
-    this.onDisconnected = null; 
-    
-    this.token = null;
+    this.onDisconnected = null;  
 
     this.readBuf = new Uint8Array(0); //only used when NODEJS 
 } 
@@ -536,13 +557,11 @@ MqClient.prototype.connect = function (connectedHandler) {
     }); 
 
     try {
-        logger.debug("Trying to connect: " + this.serverHost + ":" + this.serverPort);
-        var certFile = this.certFile;
-        if(this.serverAddress.sslEnabled) { 
-            logger.debug("cert:" + this.certFile);
+        logger.debug("Trying to connect: " + this.serverHost + ":" + this.serverPort); 
+        if(this.serverAddress.sslEnabled) {  
             this.socket = tls.connect(this.serverPort, {  
-                cert: fs.readFileSync(certFile),  
-                ca: fs.readFileSync(certFile),
+                cert: this.serverAddress.certificate,  
+                ca: this.serverAddress.certificate,
             });
         } else {
             this.socket = Socket.connect({ host: this.serverHost, port: this.serverPort }); 
@@ -628,10 +647,11 @@ MqClient.prototype.connect = function (connectedHandler) {
             var msgid = msg.id;
             var ticket = client.ticketTable[msgid];
             if (ticket) { 
+                ticket.response = msg;
                 if(ticket.resolve){
                     ticket.resolve(msg);
-                }
-                delete client.ticketTable[msgid];
+                    delete client.ticketTable[msgid];
+                } 
             } else if (client.onMessage) {
                 client.onMessage(msg);
             }
@@ -718,10 +738,11 @@ MqClient.prototype.connect = function (connectedHandler) {
         var msgid = msg.id;
         var ticket = client.ticketTable[msgid];
         if (ticket) {
+            ticket.response = msg;
             if(ticket.resolve){
                 ticket.resolve(msg);
-            }
-            delete client.ticketTable[msgid];
+                delete client.ticketTable[msgid];
+            } 
         } else if (client.onMessage) {
             client.onMessage(msg);
         }  
@@ -766,20 +787,35 @@ MqClient.prototype.address = function () {
 ///////////////////////////////commons for Node.JS and Browser///////////////////////////////////
  
 MqClient.prototype.fork = function () {
-    return new MqClient(this.serverAddress, this.certFile);
+    return new MqClient(this.serverAddress);
+} 
+
+function Ticket(reqMsg, resolve) {
+    this.id = uuid();
+    reqMsg.id = this.id; 
+    this.request = reqMsg;
+    this.response = null;
+    
+    this.resolve = resolve;  
 } 
 
 MqClient.prototype.invoke = function (msg) {
     var client = this;
+    var ticket = new Ticket(msg); 
+    this.ticketTable[ticket.id] = ticket;
+
     var promise = new Promise((resolve, reject)=>{
         if (!client.active()) {
             reject(new Error("socket is not open, invalid"));
             return;
+        }  
+        ticket.resolve = resolve;
+        if(ticket.response){ 
+            ticket.resolve(ticket.reponse);
+            delete this.ticketTable[ticket.id];
         } 
-        var ticket = new Ticket(msg, resolve); 
-        this.ticketTable[ticket.id] = ticket;
-    });  
-
+    });   
+    
     this.send(msg); 
     return promise;
 };
@@ -788,7 +824,7 @@ MqClient.prototype.invokeCmd = function (cmd, msg) {
     if (typeof (msg) == 'string') msg = { topic: msg };  //assume to be topic
     if (!msg) msg = {};
 
-    if (this.token) msg.token = this.token;
+    if (this.token && !msg.token) msg.token = this.token;
     msg.cmd = cmd; 
     return this.invoke(msg);
 }
@@ -807,8 +843,9 @@ MqClient.prototype.invokeObject = function (cmd, msg) {
   
   
 MqClient.prototype.route = function (msg) {
+    if (this.token && !msg.token) msg.token = this.token;
+
     msg.ack = false;
-    if (this.token) msg.token = this.token;
     msg.cmd = Protocol.ROUTE; 
     if (msg.status) {
         msg.originStatus = msg.status;
@@ -816,6 +853,13 @@ MqClient.prototype.route = function (msg) {
     }
     this.send(msg);
 }
+
+MqClient.prototype.ssl = function (msg) { 
+    if(msg.constructor == String){
+        msg = { server: msg };
+    }
+    return this.invokeObject(Protocol.SSL, msg) 
+} 
 
 MqClient.prototype.query = function (msg) { 
     return this.invokeObject(Protocol.QUERY, msg);
@@ -945,10 +989,7 @@ class Broker {
     constructor(trackerAddressList, readyTimeout){ 
         this.trackerSubscribers = {};
         this.clientTable = {};
-        this.routeTable = new BrokerRouteTable();  
-
-        this.sslCertFileTable = {};
-        this.defaultSslCertFile = null;
+        this.routeTable = new BrokerRouteTable();   
 
         this.onServerJoin = null;
         this.onServerLeave = null;
@@ -964,14 +1005,7 @@ class Broker {
             broker.onReady = resolve;
         });
 
-        if (trackerAddressList) {
-            var bb = trackerAddressList.split(";");
-            for(var i in bb){
-                var trackerAddress = bb[i];
-                if(trackerAddress.trim() == "") continue;;
-                this.addTracker(trackerAddress);
-            } 
-        } 
+        this._addTracker(trackerAddressList); 
 
         this.readyTimeoutFn = setTimeout(function () {
             if (!broker.readyTriggered) {
@@ -1013,14 +1047,11 @@ class Broker {
         return clients;
     }
 
-    addTracker(trackerAddress, certFile) {
-        trackerAddress = normalizeAddress(trackerAddress, certFile);
-        var fullAddr = addressKey(trackerAddress);
-        if (certFile) {
-            this.sslCertFileTable[trackerAddress.address] = certFile;
-        } 
-        if (fullAddr in this.trackerSubscribers){
-            var promise = this.readyTable[fullAddr];
+    addTracker(trackerAddress) {
+        trackerAddress = new ServerAddress(trackerAddress);
+        var addrKey = trackerAddress.string(); 
+        if (addrKey in this.trackerSubscribers){
+            var promise = this.readyTable[addrKey];
             return promise;
         } 
         var readyCount = {count: 0, triggered: false};
@@ -1028,17 +1059,20 @@ class Broker {
             readyCount.resolve = resolve;
         }); 
 
-        var client = this._createClient(trackerAddress, certFile);
-        this.trackerSubscribers[fullAddr] = client;
+        var client = new MqClient(trackerAddress);
+        this.trackerSubscribers[addrKey] = client;
 
-        var broker = this; 
-        var remoteTrackerAddress = trackerAddress;
-        client.connect(function () { 
-            client.send({cmd: Protocol.TRACK_SUB});
+        var broker = this;  
+        client.connect(function () {
+            var msg = {
+                cmd: Protocol.TRACK_SUB,
+                token: trackerAddress.token
+            }; 
+            client.send(msg);
         });
 
         client.onDisconnected = function(){
-            var toRemove = broker.routeTable.removeTracker(remoteTrackerAddress);
+            var toRemove = broker.routeTable.removeTracker(client.serverAddress);
             for (var i in toRemove) {
                 var serverAddress = toRemove[i];
                 broker._removeServer(serverAddress); 
@@ -1051,11 +1085,12 @@ class Broker {
                 return;
             }
             var trackerInfo = msg.body;
-            //update tracker address 
-            remoteTrackerAddress = trackerInfo.serverAddress; 
-            broker.sslCertFileTable[remoteTrackerAddress.address] = certFile;
+            
+            //update remote real address
+            var trackerAddress = new ServerAddress(trackerInfo.serverAddress);
+            client.serverAddress.address = trackerAddress.address; 
 
-            var addrKey = addressKey(remoteTrackerAddress)
+            var addrKey = trackerAddress.string();
             if(!(addrKey in broker.readyTable)) {
                 broker.readyTable[addrKey] = readyCount; 
                 readyCount.triggered = false;
@@ -1066,7 +1101,7 @@ class Broker {
             var serverTable = broker.routeTable.serverTable;
             for (var serverAddr in serverTable) {
                 var serverInfo = serverTable[serverAddr];
-                broker._addServer(serverInfo, readyCount);
+                broker._addServer(serverInfo, readyCount, trackerAddress);
             }
             for (var i in toRemove) {
                 var serverAddress = toRemove[i];
@@ -1076,23 +1111,65 @@ class Broker {
                 broker.onServerUpdated();
             }
         }  
+    } 
+
+    _addTracker(trackerAddressList){
+        if(trackerAddressList){
+            if(trackerAddressList.constructor == String){
+                var bb = trackerAddressList.split(";");
+                for(var i in bb){
+                    var trackerAddress = bb[i];
+                    if(trackerAddress.trim() == "") continue; 
+                    this.addTracker(trackerAddress);
+                } 
+            } else if(trackerAddressList.constructor == Array){
+                for(var i in trackerAddressList){
+                    var trackerAddress = trackerAddressList[i];
+                    trackerAddress = new ServerAddress(trackerAddress);
+                    this.addTracker(trackerAddress);
+                }
+            } else if(trackerAddressList.constructor == ServerAddress){
+                var trackerAddress = trackerAddressList;
+                this.addTracker(trackerAddress);
+            } else {
+                this.addTracker(trackerAddressList);
+            }
+        } 
     }
 
+    _addServer(serverInfo, readyCount, trackerAddress) {
+        var serverAddress = serverInfo.serverAddress;  
+        serverAddress = new ServerAddress(serverAddress); 
+        if(serverAddress.sslEnabled) {
+            var sslClient = new MqClient(trackerAddress);
+            var req = {
+                server: serverAddress.address,
+                token: trackerAddress.token,
+            }
+            sslClient.connect(()=>{
+                sslClient.ssl(req).then(certificate=>{
+                    serverAddress.certificate = certificate;
+                    this._addServerWithReadyAddress(serverInfo, serverAddress, readyCount);
+                }); 
+            }) 
+        } else {
+            this._addServerWithReadyAddress(serverInfo, serverAddress, readyCount);
+        } 
+    }
 
-    _addServer(serverInfo, readyCount) {
-        var serverAddress = serverInfo.serverAddress; 
-        var fullAddr = addressKey(serverAddress);  
-        var client = this.clientTable[fullAddr];
+    _addServerWithReadyAddress(serverInfo, serverAddress, readyCount) {
+        var addrKey = serverAddress.string();  
+        var client = this.clientTable[addrKey];
         if (client != null) { 
             return;
         } 
-        client = this._createClient(serverAddress);
-        this.clientTable[fullAddr] = client; 
-        
+        client = new MqClient(serverAddress);
+        this.clientTable[addrKey] = client;  
         var broker = this;
+
         client.connect(function () {
             if (broker.onServerJoin) {
-                logger.info("Server Joined: " + fullAddr);
+                logger.info("Server Joined: " + addrKey);
                 broker.onServerJoin(serverInfo);
             }  
             
@@ -1113,42 +1190,31 @@ class Broker {
     }
 
     _removeServer(serverAddress) { 
-        var fullAddr = addressKey(serverAddress);
-        var client = this.clientTable[fullAddr];
+        serverAddress = new ServerAddress(serverAddress);
+        var addrKey = serverAddress.string();
+        var client = this.clientTable[addrKey];
         if (client == null) {
             return;
         }
 
         if (this.onServerLeave) {
-            logger.info("Server Left: " + fullAddr);
+            logger.info("Server Left: " + addrKey);
             this.onServerLeave(serverAddress);
         }
 
         client.close();
-        delete this.clientTable[fullAddr]; 
-    }
- 
-
-    _createClient(serverAddress, certFile) {
-        if (serverAddress.sslEnabled) {
-            if (!certFile) {
-                certFile = this.sslCertFileTable[serverAddress.address];
-            }
-            if (!certFile) {
-                certFile = this.defaultSslCertFile;
-            } 
-        }
-        return new MqClient(serverAddress, certFile);
+        delete this.clientTable[addrKey]; 
     } 
 }
 
 ////////////////////////////////////////////////////////// 
 class MqAdmin {
-    constructor(broker){
+    constructor(broker, token){
         this.broker = broker;
         this.adminServerSelector = (routeTable, msg) => {
             return Object.keys(routeTable.serverTable);
         }
+        this.token = token;
     }
 
     invokeCmd0(func, msg, serverSelector) { 
@@ -1158,7 +1224,14 @@ class MqAdmin {
         var clients = this.broker.select(serverSelector, msg);
         if (clients.length < 1) {
             throw new Error("Missing server for topic: " + msg.topic);
-        };
+        }
+        if(msg.constructor == String){
+            msg = {topic: msg};
+        }
+        if(!msg.token) {
+            msg.token = this.token;
+        }
+
         if (clients.length == 1) {
             return clients[0][func](msg); 
         }
@@ -1177,7 +1250,7 @@ class MqAdmin {
                 return admin.invokeCmd0(func, msg, serverSelector);
             })
         }
-        return admin.invokeCmd0(func, msg, serverSelector);
+        return this.invokeCmd0(func, msg, serverSelector);
     }
 
     declare(msg, serverSelector) { 
@@ -1196,8 +1269,8 @@ class MqAdmin {
  
 
 class Producer extends(MqAdmin) {
-    constructor(broker) {
-        super(broker);
+    constructor(broker, token) {
+        super(broker, token);
         this.produceServerSelector = (routeTable, msg) => {
             var topic = msg.topic;
             if (hashSize(routeTable.serverTable) == 0) return [];
@@ -1227,17 +1300,20 @@ class Producer extends(MqAdmin) {
  
 class Consumer extends MqAdmin {
     constructor(broker, consumeCtrl){
-        super(broker); 
+        super(broker, consumeCtrl.token); 
 
         this.consumeServerSelector = (routeTable, msg) => {
             return Object.keys(routeTable.serverTable);
         }
         this.connectionCount = 1;
         this.messageHandler = null;
-        if (typeof consumeCtrl == 'string') {
-            consumeCtrl = {topic: consumeCtrl} //string assumed to be topic, otherwise as key-value control header
+        if (consumeCtrl.constructor == String) {
+            consumeCtrl = {
+                topic: consumeCtrl,
+                token: this.token
+            };
         }
-        this.consumeCtrl = clone(consumeCtrl);
+        this.consumeCtrl = clone(consumeCtrl); 
 
         this.consumeClientTable = {}; //addressKey => list of MqClient consuming
     }  
@@ -1277,9 +1353,14 @@ class Consumer extends MqAdmin {
         for (var i = 0; i < this.connectionCount; i++) {
             var client = clientInBrokerTable.fork(); //create new connections
             clients.push(client);   
-            client.connect((client) => { //web browser need
+            client.connect((client) => { //web browser need 
                 var ctrl = clone(consumer.consumeCtrl);
-                consumer.consume(client, ctrl);
+                client.declare(ctrl).then(res=>{
+                    if (res.error) { 
+                        throw new Error("declare error: " + res.error);
+                    } 
+                    consumer.consume(client);
+                });
             });  
         }  
         this.consumeClientTable[addr] = clients; 
@@ -1296,17 +1377,21 @@ class Consumer extends MqAdmin {
         delete this.consumeClientTable[addr]; 
     } 
 
-    consume(client, consumeCtrl) { 
+    consume(client) {  
         var consumer = this; 
-        client.consume(consumeCtrl)
+        var ctrl = clone(this.consumeCtrl);
+        client.token = this.consumeCtrl.token; //!!client need this token in route message!!
+
+        client.consume(ctrl)
         .then(res => {
             if(res.status == 404) {//Missing topic, to declare 
-                return client.declare(consumeCtrl)
+                var ctrl = clone(consumer.consumeCtrl);
+                return client.declare(ctrl)
                 .then(res=>{
                     if (res.error) { 
                         throw new Error("declare error: " + res.error);
                     } 
-                    return consumer.consume(client, consumeCtrl);
+                    return consumer.consume(client);
                 });
             } 
 
@@ -1320,14 +1405,14 @@ class Consumer extends MqAdmin {
             try {
                 consumer.messageHandler(res, client);
             } finally {
-                consumer.consume(client, consumeCtrl);
+                consumer.consume(client);
             } 
         }); 
     }
 }
 
 class RpcInvoker { 
-    constructor(broker, topic, ctrl, serverSelector){
+    constructor(broker, topicOrCtrl, serverSelector){
         if(serverSelector){
             this.rpcServerSelector = serverSelector;
         }  else {
@@ -1347,18 +1432,15 @@ class RpcInvoker {
                 }
                 return [addressKey(target.serverAddress)];
             }
-        }
-        
+        } 
 
         this.broker = broker;
         this.prodcuer = new Producer(broker); 
-        if (ctrl) {
-            this.ctrl = clone(ctrl);
-            this.ctrl.topic = topic;
+        if(topicOrCtrl.constructor == String){
+            this.ctrl = {topic: topicOrCtrl};
         } else {
-            this.ctrl = { topic: topic }
+            this.ctrl = clone(topicOrCtrl); 
         } 
-
         var invoker = this; 
         return new Proxy(this, {
             get: function (target, name) {
@@ -1490,16 +1572,108 @@ class RpcProcessor {
         }
     }
 }
+
+class ServiceBootstrap {
+    constructor(){
+        this.processor = new RpcProcessor();
+        this.broker = new Broker(); 
+        this.connectionSize = 1;
+    }  
+
+    start () {
+        if(this.consumer) return; 
+        if(!this.topic){
+            throw new Error("Missing serviceName");
+        }  
+        var consumeCtrl = {
+            topic: this.topic,
+            topic_mask: Protocol.MASK_MEMORY | Protocol.MASK_RPC,
+            token: this.token
+        };
+        this.consumer = new Consumer(this.broker, consumeCtrl);
+        this.consumer.messageHandler = this.processor.messageHandler;
+        this.consumer.connectionCount = this.connectionSize; 
+        this.consumer.start(); 
+    } 
+
+    close() {
+        if(this.consumer){
+            this.consumer.close();
+            this.consumer = null;
+        }
+        if(this.broker){
+            this.broker.close();
+            this.broker = null;
+        }
+    }
+
+    serviceAddress(address){
+        this.broker._addTracker(address);
+        return this;
+    }
+    serviceName(name) {
+        this.topic = name;
+        return this;
+    } 
+    serviceToken(token){
+        this.token = token;
+        return this;
+    }   
+    connectionCount(count){
+        this.connectionSize = count;
+        return this;
+    } 
+    addModule(serviceObj, moduleName){
+        this.processor.addModule(serviceObj, moduleName);
+        return this;
+    } 
+}
+
+
+
+class ClientBootstrap {
+    constructor(){ 
+        this.broker = new Broker();  
+    }   
+    serviceAddress(address){
+        this.broker._addTracker(address);
+        return this;
+    }
+    serviceName(name) {
+        this.topic = name;
+        return this;
+    } 
+    serviceToken(token){
+        this.token = token;
+        return this;
+    }   
+    invoker(){
+        var ctrl = {
+            topic: this.topic,
+            token: this.token
+        };
+        return new RpcInvoker(this.broker, ctrl);
+    }
+    close() { 
+        if(this.broker){
+            this.broker.close();
+            this.broker = null;
+        }
+    }
+}
   
 if (__NODEJS__) {
     module.exports.Protocol = Protocol; 
     module.exports.MqClient = MqClient;
+    module.exports.ServerAddress = ServerAddress;
     module.exports.BrokerRouteTable = BrokerRouteTable;
     module.exports.Broker = Broker;
     module.exports.Producer = Producer;
     module.exports.Consumer = Consumer;
     module.exports.RpcInvoker = RpcInvoker;
     module.exports.RpcProcessor = RpcProcessor;
+    module.exports.ServiceBootstrap = ServiceBootstrap;
+    module.exports.ClientBootstrap = ClientBootstrap;
     module.exports.Logger = Logger;
     module.exports.logger = logger;
 }

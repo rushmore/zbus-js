@@ -1,6 +1,6 @@
 {
   "name": "zbus",
-  "version": "0.8.4",
+  "version": "0.8.9",
   "description": "- zbus.js works for both Browser and NodeJS environments.\r - zbus.js is the only source file required",
   "main": "zbus.js", 
   "repository": {

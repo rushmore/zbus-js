@@ -7,10 +7,13 @@
 logger.level = logger.DEBUG; //from zbus.js
 
 async function f(){
- 
-var broker = new Broker("localhost:15555;localhost:15556"); 
 
-var p = new Producer(broker);
+var token = "mytopic"; //authentication
+var broker = new Broker(); 
+broker.addTracker({address: 'localhost:15555', token: token});
+broker.addTracker({address: 'localhost:15556', token: token});
+
+var p = new Producer(broker, token);
 var res = await p.declare('MyTopic'); //If topic is new, you may have to declare it, otherwise ignore
 console.log(res);
 var res = await p.publish({topic: 'MyTopic', body: 'hello from JS(async/await)'}) 

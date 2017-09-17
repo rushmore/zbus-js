@@ -1,13 +1,16 @@
 ﻿if (typeof module !== 'undefined' && module.exports) {
-    var zbus = require("../../zbus.js");
-    Broker = zbus.Broker;
-    RpcInvoker = zbus.RpcInvoker;
-	var logger = zbus.logger;
-}  
-logger.level = logger.DEBUG; //from zbus.js
+    var zbus = require("../../zbus.js"); 
+    ClientBootstrap = zbus.ClientBootstrap; 
+}   
+ 
+var b = new ClientBootstrap(); 
+b.serviceName("MyRpc")
+.serviceAddress("localhost:15555");
+ //.serviceToken("myrpc_service")
+ //.serviceAddress("localhost:15555;locahost:15556"); //HA
+ //.serviceAddress({address: 'localhost:15555', token: 'myrpc_service'});
 
-var broker = new Broker("localhost:15555;localhost:15556"); 
-var rpc = new RpcInvoker(broker, "MyRpc");   
+var rpc = b.invoker();
 
 async function f(){ 
 
@@ -23,7 +26,6 @@ console.log(res);
 var res = await rpc.plus(1, 2);
 console.log(res);
 
-//broker.close(); //close the connections
-
+b.close();  
 }
 f();
