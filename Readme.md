@@ -31,7 +31,7 @@ you are ready to go
 
 **2. Web Browser**
 
-    just include zbus.js
+    just include zbus.min.js
 
 
 ## API Demo
