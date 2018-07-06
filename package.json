@@ -1,17 +1,20 @@
 {
   "name": "zbus",
-  "version": "0.8.9",
-  "description": "- zbus.js works for both Browser and NodeJS environments.\r - zbus.js is the only source file required",
-  "main": "zbus.js", 
-  "repository": {
-    "type": "git",
-    "url": "https://gitee.com/rushmore/zbus-javascript.git"
+  "version": "1.0.5",
+  "description": "zbus js client",
+  "main": "./zbus.js",
+  "author": "rushmore",
+  "license": "MIT",
+  "scripts": {
+    "build": "webpack"
   },
-  "keywords": [
-    "zbus",
-    "MQ",
-    "RPC"
-  ],
-  "author": "rushmore <hong.leiming@qq.com>",
-  "license": "MIT"
+  "dependencies": {
+    "json-stable-stringify": "^1.0.1",
+    "jssha": "^2.3.1",
+    "ws": "^3.2.0"
+  },
+  "devDependencies": { 
+    "webpack": "^4.14.0",
+    "webpack-cli": "^3.0.8"
+  }
 }

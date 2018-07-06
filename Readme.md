@@ -14,10 +14,10 @@ zbus strives to make Message Queue and Remote Procedure Call fast, light-weighte
 zbus carefully designed on its protocol and components to embrace KISS(Keep It Simple and Stupid) principle, but in all it delivers power and elasticity. 
 
 
-# zbus-javascript
+# zbus-js
 
 - zbus's javascript works for both Browser and NodeJS environments.
-- zbus.js is the only source file required
+- zbus.js is the only source file required in browser
 
 ## Getting started
 
@@ -25,21 +25,13 @@ Start zbus, see [https://gitee.com/rushmore/zbus](https://gitee.com/rushmore/zbu
 
 **1. NodeJS**
 
-zbus has no dependency
-
     npm install zbus
 
 you are ready to go 
 
 **2. Web Browser**
 
-The easiest way to test zbus.js in browser is to use chrome or firefox to access
-[http://zbus.io](http://zbus.io) 
-
-In the console, you can program to invoke RPC methods, such as plus/echo(support by the above example)
-
-![RPC in browser](https://git.oschina.net/uploads/images/2017/0701/185654_332bde18_7458.png "Rpc in browser")
-
+    just include zbus.js
 
 
 ## API Demo
@@ -48,84 +40,112 @@ Only demos the gist of API, more configurable usage calls for your further inter
 
 ### Produce message
 
-    var broker = new Broker("localhost:15555;localhost:15556"); 
+    const client = new MqClient("localhost:15555");     
 
-    var p = new Producer(broker);
-    var res = await p.declare('MyTopic'); //If topic is new, you may have to declare it, otherwise ignore
-    console.log(res);
-    var res = await p.publish({topic: 'MyTopic', body: 'hello from JS(async/await)'}) 
-    console.log(res);
+    client.connect().then(()=>{
+        var msg = {
+            cmd: 'pub',
+            mq: 'MyMQ',
+            body: 'hello from js'
+        };
+        client.invoke(msg).then(res=>{
+            console.log(res);
+        });
+    });  
+    
 
 
 
 ### Consume message
 
-    var broker = new Broker("localhost:15555");
+    const client = new MqClient("localhost:15555");  
 
-    var c = new Consumer(broker, "MyTopic"); 
-    c.onMessage = function (msg, client) {
-        console.log(msg);
+    var mq = "MyMQ", channel = "MyChannel"; 
+    function create(mq, channel){ 
+        var msg = {};
+        msg.headers = {
+            cmd: 'create',
+            mq: mq,
+            channel: channel, 
+        }; 
+
+        client.invoke(msg).then(res=>{
+            console.log(res);
+        }); 
     }
-    c.start();  
+
+    function sub(mq, channel){
+        var msg = {};
+        msg.headers = {
+            cmd: 'sub',
+            mq: mq,
+            channel: channel, 
+        }; 
+        client.invoke(msg).then(res=>{ 
+            console.log(res); 
+        }); 
+    }  
+    
+    client.addMqHandler(mq, channel, msg=>{ 
+        console.log(msg); 
+    });
+
+    client.onopen = ()=>{
+        create(mq, channel);
+        sub(mq, channel);
+    };
+
+    client.connect();
 
 
 ### RPC client
 
-    var broker = new Broker("localhost:15555;localhost:15556"); 
-    var rpc = new RpcInvoker(broker, "MyRpc");   
+    const rpc = new RpcClient("localhost:15555");     
 
-    //1) Raw invocation {method: xxx, params: []}
-    var res = await rpc.invoke({ method: 'plus', params: [1, 2] });
-    console.log(res);
+	var res = await rpc.example.plus(1,2);
+	console.log(res); 
 
-    //2) Raw invocation, method, param1,....
-    var res = await rpc.invoke('plus', 1, 2);
-    console.log(res);
-
-    //3) Dynamic proxy
-    var res = await rpc.plus(1, 2);
-    console.log(res);
-
-    broker.close(); //Broker should be shared, close if no need anymore.
 
 ### RPC service
 
-    function MyService() {
-        this.plus = function (a, b) {
+    class MyService{
+        plus(a, b) {
             return parseInt(a) + parseInt(b);
         } 
-        this.echo = function (value) {
+        echo(value) {
             return value;
-        } 
-        this.getString = function (value, c) {
-            if (!c) return value + ", frome javascript";
-            return value + ", " + c;
-        } 
-        this.testEncoding = function () {
+        }  
+        testEncoding() {
             return "中文";
         } 
-        this.stringArray = function () {
+        stringArray() {
             return ["hong", "leiming"];
         } 
-        this.getBin = function () {
+        getBin() {
             return new Uint8Array(10);
-        }
-    }  
+        }  
 
-    function myplus(a, b) {
-        return a + b;
-    }   
+        getOrder(){
+            return {name: 'orderName', age: 18};
+        } 
 
-    //sparate the business logic, the following is only a routine configuration
+        html(){
+            var res = new Message();
+            res.status= 200;
+            res.headers['content-type'] = 'text/html; charset=utf8';
+            res.body = "<h1>hello html body</h1>"
+            return res;
+        } 
+    }       
 
-    var rpc = new RpcProcessor();
-    rpc.addModule(myplus); //method example
-    rpc.addModule(new MyService()); //object example 
+    var p = new RpcProcessor();
+    p.urlPrefix = "";
+    p.mount("/example", new MyService());
+    p.mount("/", home);
 
-    //start Consumer with rpc.onMessage handling
-    var broker = new Broker("localhost:15555");
-
-    var c = new Consumer(broker, "MyRpc");
-    c.connectionCount = 1;
-    c.messageHandler = rpc.messageHandler;
-    c.start(); 
+    //RPC via MQ
+    var server = new RpcServer(p);
+    server.mq = "MyRpc";
+    server.address = "localhost:15555"; 
+    //server.enableAuth("2ba912a8-4a8d-49d2-1a22-198fd285cb06", "461277322-943d-4b2f-b9b6-3f860d746ffd"); //apiKey + secretKey 
+    server.start();

@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-type" content="text/html; charset=utf-8" /> 
+<script type="text/javascript" src="../zbus.min.js"></script>
+</head>
+<body>      
+
+<script type="text/javascript">  
+const client = new RpcClient("localhost:15555");     
+
+api.example.plus(1,2).then(res=>{
+	console.log(res); 
+});
+
+</script>
+</body> 
+</html>

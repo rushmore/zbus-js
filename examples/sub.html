@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-type" content="text/html; charset=utf-8" /> 
+<script type="text/javascript" src="../zbus.min.js"></script>
+</head>
+<body>      
+
+<script type="text/javascript">  
+var mq = "MyMQ", channel = "MyChannel";
+const ws = new MqClient("localhost:15555");  
+
+function create(){
+    var msg = {
+        cmd: 'create',
+        mq: mq,
+        channel: channel, 
+    };
+    ws.invoke(msg).then(res=>{
+        console.log(res);
+    }); 
+}
+
+function sub(){
+    var msg = {
+        cmd: 'sub',
+        mq: mq,
+        channel: channel, 
+    };
+
+    ws.invoke(msg).then(res=>{
+        console.log(res);
+    }); 
+} 
+
+ws.onopen = ()=>{
+    create();
+    sub();
+}; 
+
+ws.addMqHandler(mq, channel, msg=>{
+    console.log(msg);
+});
+
+ws.connect();   
+
+</script>
+</body> 
+</html>

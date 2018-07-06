@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-type" content="text/html; charset=utf-8" /> 
+<script type="text/javascript" src="../zbus.min.js"></script>
+</head>
+<body>      
+
+<script type="text/javascript">  
+
+class MyService{
+	plus(a, b) {
+		return parseInt(a) + parseInt(b);
+	} 
+	echo(value) {
+		return value;
+	}  
+	testEncoding() {
+		return "中文";
+	} 
+	stringArray() {
+		return ["hong", "leiming"];
+	} 
+	getBin() {
+		return new Uint8Array(10);
+	}  
+
+	html(){
+		var res = new Message();
+		res.status= 200;
+		res.body = "hello html body"
+		return res;
+	} 
+}      
+
+
+var p = new RpcProcessor();
+p.urlPrefix = "";
+p.mount("/example", new MyService()); 
+
+var server = new RpcServer(p);
+server.mq = "MyRpc";
+server.address = "localhost:15555"; 
+server.start();
+
+</script>
+</body> 
+</html>
